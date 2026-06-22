@@ -1,0 +1,96 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  starrocks:
+    image: starrocks/allin1-ubuntu:latest
+    container_name: starrocks
+    ports:
+      - "9030:9030"
+      - "8030:8030"
+      - "8040:8040"
+    volumes:
+      - starrocks_data:/opt/starrocks
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -h 127.0.0.1 -P 9030 -uroot -e 'SELECT 1' 2>/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+
+  data_loader:
+    build: ./data_loader
+    container_name: data_loader
+    depends_on:
+      starrocks:
+        condition: service_healthy
+    environment:
+      - SR_HOST=starrocks
+      - SR_PORT=9030
+      - SR_USER=root
+      - SR_PASSWORD=
+      - SR_DATABASE=people_db
+      - EXCEL_PATH=/data/people.xlsx
+    volumes:
+      - ./data:/data
+
+  agent:
+    build: ./agent
+    container_name: ai_agent
+    depends_on:
+      starrocks:
+        condition: service_healthy
+    environment:
+      - SR_HOST=starrocks
+      - SR_PORT=9030
+      - SR_USER=readonly_user
+      - SR_PASSWORD=ReadOnly@123
+      - SR_DATABASE=people_db
+      - OPENAI_API_KEY=ollama
+      - OPENAI_BASE_URL=http://host.docker.internal:11434/v1
+      - MODEL_NAME=qwen2.5:3b
+    ports:
+      - "8001:8001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: backend
+    depends_on:
+      - agent
+    environment:
+      - AGENT_URL=http://ai_agent:8001
+      - DATABASE_URL=sqlite:////app/data/conversations.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_data:/app/data
+    restart: unless-stopped
+
+  open_webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open_webui
+    depends_on:
+      - backend
+    environment:
+      - OPENAI_API_BASE_URL=http://backend:8000/v1
+      - OPENAI_API_KEY=dummy-key
+      - WEBUI_AUTH=False
+      - RAG_EMBEDDING_ENGINE=ollama                           # ← تغییر
+      - RAG_EMBEDDING_MODEL=nomic-embed-text                 # ← مدل embedding
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434    # ← آدرس ollama
+      - ENABLE_RAG_WEB_SEARCH=False
+    ports:
+      - "3000:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - webui_data:/app/backend/data
+    restart: unless-stopped
+
+volumes:
+  starrocks_data:
+  backend_data:
+  webui_data:

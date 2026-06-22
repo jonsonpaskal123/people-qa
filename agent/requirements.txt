@@ -1,0 +1,8 @@
+langchain
+langchain-openai
+langchain-core
+langgraph
+fastapi==0.115.0
+uvicorn==0.30.0
+pymysql==1.1.0
+python-dotenv==1.0.0
